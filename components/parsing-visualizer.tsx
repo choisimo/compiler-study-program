@@ -1,35 +1,47 @@
 "use client"
 
+import {
+  parseGrammarFromString,
+  calculateFirstSetsInternal,
+  calculateFollowSetsInternal,
+  constructLL1ParsingTableInternal,
+  stringToLR1Item,
+  LR1Item,
+  // Removed local type definitions that conflict with imported types
+  CanonicalCollectionLR1,
+  LR1Transitions,
+  LL1Table,
+  SLRTable,
+  ExampleSet,
+  ParsingStep
+} from "./lib/parsing-algorithms"; // Import the new utility functions
+import { ll1TableData, slrTableData, ll1ExampleSet } from "./lib/constants"; // Import constants
+
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea" // Added for grammar input
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Play, RotateCcw, ArrowRight } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 
-// Added type definitions
-interface ParsingStep {
-  stack: string;
-  input: string;
-  action: string;
-}
+// Removed local type definitions that conflict with imported types
 
+// --- START: Added type definitions for LL(1) ---
 interface ExampleOption {
   label: string;
   value: string; // This is the input string for the example
 }
 
-// --- START: Added type definitions for LL(1) ---
-type ProductionRule = string[]; // e.g., ["T", "E'"] or ["ε"] or ["a"]
 interface Grammar {
-  [nonTerminal: string]: ProductionRule[]; // E.g. E -> T E' | a becomes { "E": [ ["T", "E'"], ["a"] ] }
+  [nonTerminal: string]: string[][]; // E.g. E -> T E' | a becomes { "E": [ ["T", "E'"], ["a"] ] }
 }
 interface FirstFollowSets {
   [nonTerminal:string]: Set<string>; // E.g. { "E": new Set(["a", "("]) }
 }
+
 // --- END: Added type definitions for LL(1) ---
 
 // --- START: Added type definitions for LALR(1) ---
@@ -37,8 +49,6 @@ interface FirstFollowSets {
 // Stringified for use in Sets: "[A -> alpha . beta, lookahead]"
 type LR1ItemString = string; 
 type LR1ItemSet = Set<LR1ItemString>; 
-type CanonicalCollectionLR1 = Map<number, LR1ItemSet>; // Key is state ID
-type LR1Transitions = Map<number, Map<string, number>>; // StateID -> (Symbol -> StateID)
 
 // LALR(1) specific types
 // For LALR(1) states, the structure of items and sets is the same, but items within a set might have merged lookaheads.
@@ -48,189 +58,12 @@ type LALR1ParsingTable = {
 };
 // --- END: Added type definitions for LALR(1) ---
 
-// Moved to parsing-algorithms.ts or a shared types file if these become more common.
-// For now, they are here and also expected by parsing-algorithms.ts for import.
-// Keeping them here allows the component to function without immediately creating a shared types file.
-// Duplication is temporary if a types file isn't made next.
-export interface LL1Table { // This was already here, just confirming its use
-  [nonTerminal: string]: {
-    [terminal: string]: string; // The string is the production rule, e.g., "E → TE'"
-  };
-}
-
-interface SLRTableAction {
-  [symbol: string]: string; // e.g., "s2", "r1", "accept", or a state number for GOTO
-}
-
-interface SLRTable {
-  [state: number]: SLRTableAction;
-}
-
-type ExampleSet = {
-  [inputString: string]: ParsingStep[];
-};
-
 interface ParsingVisualizerProps {
   type: "ll1" | "slr1" | "lalr1"
 }
 
-const ll1TableData: LL1Table = {
-  E: { a: "E → TE'", "(": "E → TE'" },
-  "E'": { "+": "E' → +TE'", ")": "E' → ε", "$": "E' → ε" },
-  T: { a: "T → FT'", "(": "T → FT'" },
-  "T'": { "+": "T' → ε", "*": "T' → *FT'", ")": "T' → ε", "$": "T' → ε" },
-  F: { a: "F → a", "(": "F → (E)" },
-};
-
-/*
-// This is the original ll1TableData, it will be removed once dynamic generation is complete.
-const ll1TableData: LL1Table = {
- E: { a: "E → TE'", "(": "E → TE'" },
- "E'": { "+": "E' → +TE'", ")": "E' → ε", "$": "E' → ε" },
- T: { a: "T → FT'", "(": "T → FT'" },
- "T'": { "+": "T' → ε", "*": "T' → *FT'", ")": "T' → ε", "$": "T' → ε" },
- F: { a: "F → a", "(": "F → (E)" },
-};
-*/
-
-// const ll1TableData: LL1Table = {
-// E: { a: "E → TE'", "(": "E → TE'" },
-// "E'": { "+": "E' → +TE'", ")": "E' → ε", "$": "E' → ε" },
-// T: { a: "T → FT'", "(": "T → FT'" },
-// "T'": { "+": "T' → ε", "*": "T' → *FT'", ")": "T' → ε", "$": "T' → ε" },
-// F: { a: "F → a", "(": "F → (E)" },
-// };
-
-const slrTableData: SLRTable = {
-  0: { n: "s2", E: "1" },
-  1: { "+": "s3", "$": "accept" },
-  2: { "+": "r2", "$": "r2" },
-  3: { n: "s4" }, 
-  4: { "+": "r1", "$": "r1" },
-};
-
-const ll1ExampleSet: ExampleSet = {
-  "a+a$": [
-    { stack: "$E", input: "a+a$", action: "E → TE'" },
-    { stack: "$E'T", input: "a+a$", action: "T → FT'" },
-    { stack: "$E'T'F", input: "a+a$", action: "F → a" },
-    { stack: "$E'T'a", input: "a+a$", action: "Match a" },
-    { stack: "$E'T'", input: "+a$", action: "T' → ε" },
-    { stack: "$E'", input: "+a$", action: "E' → +TE'" },
-    { stack: "$E'T+", input: "+a$", action: "Match +" },
-    { stack: "$E'T", input: "a$", action: "T → FT'" },
-    { stack: "$E'T'F", input: "a$", action: "F → a" },
-    { stack: "$E'T'a", input: "a$", action: "Match a" },
-    { stack: "$E'T'", input: "$", action: "T' → ε" },
-    { stack: "$E'", input: "$", action: "E' → ε" },
-    { stack: "$", input: "$", action: "Accept" },
-  ],
-  "a$": [
-    { stack: "$E", input: "a$", action: "E → TE'" },
-    { stack: "$E'T", input: "a$", action: "T → FT'" },
-    { stack: "$E'T'F", input: "a$", action: "F → a" },
-    { stack: "$E'T'a", input: "a$", action: "Match a" },
-    { stack: "$E'T'", input: "$", action: "T' → ε" },
-    { stack: "$E'", input: "$", action: "E' → ε" },
-    { stack: "$", input: "$", action: "Accept" },
-  ],
-  "(a)$": [
-    { stack: "$E", input: "(a)$", action: "E → TE'" },
-    { stack: "$E'T", input: "(a)$", action: "T → FT'" },
-    { stack: "$E'T'F", input: "(a)$", action: "F → (E)" },
-    { stack: "$E'T')E(", input: "(a)$", action: "Match (" },
-    { stack: "$E'T')E", input: "a)$", action: "E → TE'" },
-    { stack: "$E'T')E'T", input: "a)$", action: "T → FT'" },
-    { stack: "$E'T')E'T'F", input: "a)$", action: "F → a" },
-    { stack: "$E'T')E'T'a", input: "a)$", action: "Match a" },
-    { stack: "$E'T')E'T'", input: ")$", action: "T' → ε" },
-    { stack: "$E'T')E'", input: ")$", action: "E' → ε" },
-    { stack: "$E'T')", input: ")$", action: "Match )" },
-    { stack: "$E'T'", input: "$", action: "T' → ε" },
-    { stack: "$E'", input: "$", action: "E' → ε" },
-    { stack: "$", input: "$", action: "Accept" },
-  ],
-  "a*a$": [
-    { stack: "$E", input: "a*a$", action: "E → TE'" },
-    { stack: "$E'T", input: "a*a$", action: "T → FT'" },
-    { stack: "$E'T'F", input: "a*a$", action: "F → a" },
-    { stack: "$E'T'a", input: "a*a$", action: "Match a" },
-    { stack: "$E'T'", input: "*a$", action: "T' → *FT'" },
-    { stack: "$E'T'F*", input: "*a$", action: "Match *" }, 
-    { stack: "$E'T'F", input: "a$", action: "F → a" }, 
-    { stack: "$E'T'a", input: "a$", action: "Match a" }, 
-    { stack: "$E'T'", input: "$", action: "T' → ε" },
-    { stack: "$E'", input: "$", action: "E' → ε" },
-    { stack: "$", input: "$", action: "Accept" },
-  ],
-};
-
-/*
-// This is the original ll1ExampleSet, it will be removed once dynamic generation is complete.
-const ll1ExampleSet: ExampleSet = {
- "a+a$": [
-    { stack: "$E", input: "a+a$", action: "E → TE'" },
-    // ... other steps
-  ],
-  // ... other examples
-};
-*/
-
-// const ll1ExampleSet: ExampleSet = {
-// "a+a$": [
-// { stack: "$E", input: "a+a$", action: "E → TE'" },
-// { stack: "$E'T", input: "a+a$", action: "T → FT'" },
-// { stack: "$E'T'F", input: "a+a$", action: "F → a" },
-// { stack: "$E'T'a", input: "a+a$", action: "Match a" },
-// { stack: "$E'T'", input: "+a$", action: "T' → ε" },
-// { stack: "$E'", input: "+a$", action: "E' → +TE'" },
-// { stack: "$E'T+", input: "+a$", action: "Match +" },
-// { stack: "$E'T", input: "a$", action: "T → FT'" },
-// { stack: "$E'T'F", input: "a$", action: "F → a" },
-// { stack: "$E'T'a", input: "a$", action: "Match a" },
-// { stack: "$E'T'", input: "$", action: "T' → ε" },
-// { stack: "$E'", input: "$", action: "E' → ε" },
-// { stack: "$", input: "$", action: "Accept" },
-// ],
-// "a$": [
-// { stack: "$E", input: "a$", action: "E → TE'" },
-// { stack: "$E'T", input: "a$", action: "T → FT'" },
-// { stack: "$E'T'F", input: "a$", action: "F → a" },
-// { stack: "$E'T'a", input: "a$", action: "Match a" },
-// { stack: "$E'T'", input: "$", action: "T' → ε" },
-// { stack: "$E'", input: "$", action: "E' → ε" },
-// { stack: "$", input: "$", action: "Accept" },
-// ],
-// "(a)$": [
-// { stack: "$E", input: "(a)$", action: "E → TE'" },
-// { stack: "$E'T", input: "(a)$", action: "T → FT'" },
-// { stack: "$E'T'F", input: "(a)$", action: "F → (E)" },
-// { stack: "$E'T')E(", input: "(a)$", action: "Match (" },
-// { stack: "$E'T')E", input: "a)$", action: "E → TE'" },
-// { stack: "$E'T')E'T", input: "a)$", action: "T → FT'" },
-// { stack: "$E'T')E'T'F", input: "a)$", action: "F → a" },
-// { stack: "$E'T')E'T'a", input: "a)$", action: "Match a" },
-// { stack: "$E'T')E'T'", input: ")$", action: "T' → ε" },
-// { stack: "$E'T')E'", input: ")$", action: "E' → ε" },
-// { stack: "$E'T')", input: ")$", action: "Match )" },
-// { stack: "$E'T'", input: "$", action: "T' → ε" },
-// { stack: "$E'", input: "$", action: "E' → ε" },
-// { stack: "$", input: "$", action: "Accept" },
-// ],
-// "a*a$": [
-// { stack: "$E", input: "a*a$", action: "E → TE'" },
-// { stack: "$E'T", input: "a*a$", action: "T → FT'" },
-// { stack: "$E'T'F", input: "a*a$", action: "F → a" },
-// { stack: "$E'T'a", input: "a*a$", action: "Match a" },
-// { stack: "$E'T'", input: "*a$", action: "T' → *FT'" },
-// { stack: "$E'T'F*", input: "*a$", action: "Match *" },
-// { stack: "$E'T'F", input: "a$", action: "F → a" },
-// { stack: "$E'T'a", input: "a$", action: "Match a" },
-// { stack: "$E'T'", input: "$", action: "T' → ε" },
-// { stack: "$E'", input: "$", action: "E' → ε" },
-// { stack: "$", input: "$", action: "Accept" },
-// ],
-// };
+// Removed the direct declaration of ll1TableData, slrTableData, ll1ExampleSet
+// as they are now imported from constants.ts
 
 const slrExampleSet: ExampleSet = {
   "n+n$": [
@@ -597,116 +430,86 @@ export default function ParsingVisualizer({ type }: ParsingVisualizerProps) {
   // --- END: LL(1) Parsing Algorithm ---
 
 
-import { 
-  parseGrammarFromString, 
-  calculateFirstSetsInternal, 
-  calculateFollowSetsInternal,
-  constructLL1ParsingTableInternal
-} from "./lib/parsing-algorithms"; // Import the new utility functions
-
-// --- START: LL(1) Core Logic (Refactored to use utility functions) ---
-useEffect(() => {
-  if (type !== "ll1") {
-    // Optionally clear LL(1) states if type changes away from LL(1)
-    // This might be desired if grammarInput is not shared or should reset
-    // setLl1Error(null); setParsedGrammar({}); setFirstSets({}); setFollowSets({}); 
-    // setLl1ParsingTable({}); setTerminals(new Set()); setNonTerminals(new Set()); setStartSymbol("");
-    return;
-  }
-
-  setLl1Error(null);
-  setParsedGrammar({}); 
-  setFirstSets({}); 
-  setFollowSets({}); 
-  setLl1ParsingTable({});
-  setTerminals(new Set());
-  setNonTerminals(new Set());
-  setStartSymbol("");
-  setSteps([]); // Clear previous steps
-
-  const grammarResult = parseGrammarFromString(grammarInput);
-
-  if (grammarResult.error) {
-    setLl1Error(grammarResult.error);
-    return;
-  }
-  if (Object.keys(grammarResult.parsedGrammar).length === 0 && !grammarInput.trim()) {
-      // Empty grammar, valid, but nothing to process
-      setTerminals(new Set(["$"])); // Ensure terminals has $ for table rendering
+  // --- START: LL(1) Core Logic (Refactored to use utility functions) ---
+  useEffect(() => {
+    if (type !== "ll1") {
+      // Optionally clear LL(1) states if type changes away from LL(1)
+      // This might be desired if grammarInput is not shared or should reset
+      // setLl1Error(null); setParsedGrammar({}); setFirstSets({}); setFollowSets({}); 
+      // setLl1ParsingTable({}); setTerminals(new Set()); setNonTerminals(new Set()); setStartSymbol("");
       return;
-  }
-   if (Object.keys(grammarResult.parsedGrammar).length === 0 && grammarInput.trim()) {
-      // Parsing resulted in empty grammar but there was input, likely an issue.
-      setLl1Error(grammarResult.error || "Failed to parse grammar: unknown error.");
-      return;
-  }
-
-
-  setParsedGrammar(grammarResult.parsedGrammar);
-  setNonTerminals(grammarResult.nonTerminals);
-  setTerminals(grammarResult.terminals);
-  setStartSymbol(grammarResult.startSymbol);
-
-  const firstSetResult = calculateFirstSetsInternal(
-    grammarResult.parsedGrammar, 
-    grammarResult.nonTerminals, 
-    grammarResult.terminals,
-    // grammarResult.allSymbols // Potentially pass allSymbols if needed for epsilon handling
-  );
-
-  if (firstSetResult.error) {
-    setLl1Error(firstSetResult.error);
-    return;
-  }
-  setFirstSets(firstSetResult.firstSets);
-
-  if (!grammarResult.startSymbol && Object.keys(grammarResult.parsedGrammar).length > 0) {
-    setLl1Error("Start symbol could not be determined from the grammar.");
-    return;
-  }
-  if (Object.keys(grammarResult.parsedGrammar).length === 0 && grammarInput.trim()) {
-    // If grammar is empty after parsing but there was input, it's an error.
-    // If grammarInput was also empty, it's not an error, just nothing to do.
-    setLl1Error("Grammar parsed to empty, check input.");
-    return;
-  }
-
-
-  const followSetResult = calculateFollowSetsInternal(
-    grammarResult.parsedGrammar,
-    grammarResult.nonTerminals,
-    grammarResult.startSymbol,
-    firstSetResult.firstSets
-  );
-
-  if (followSetResult.error) {
-    setLl1Error(followSetResult.error);
-    return;
-  }
-  setFollowSets(followSetResult.followSets);
-
-  const ll1TableResult = constructLL1ParsingTableInternal(
-    grammarResult.parsedGrammar,
-    firstSetResult.firstSets,
-    followSetResult.followSets,
-    grammarResult.nonTerminals,
-    grammarResult.terminals
-  );
-
-  if (ll1TableResult.error) {
-    setLl1Error(ll1TableResult.error);
-    // Set table and conflicts if they exist, even with an error
-    setLl1ParsingTable(ll1TableResult.table);
-    if(ll1TableResult.conflicts.length > 0) {
-        setLl1Error(prev => prev ? `${prev}\nConflicts: ${ll1TableResult.conflicts.join('\n')}` : `Conflicts: ${ll1TableResult.conflicts.join('\n')}`);
     }
-    return;
+
+    setLl1Error(null);
+    setParsedGrammar({}); 
+    setFirstSets({}); 
+    setFollowSets({}); 
+    setLl1ParsingTable({});
+    setTerminals(new Set()); // Changed from new Set(["$"])
+    setNonTerminals(new Set()); 
+    setStartSymbol("");
+    setSteps([]); // Clear previous steps
+
+    const grammarResult = parseGrammarFromString(grammarInput);
+
+    if (Object.keys(grammarResult.parsedGrammar).length === 0 && !grammarInput.trim()) {
+        // Empty grammar, valid, but nothing to process
+        setTerminals(new Set(["$"])); // Ensure terminals has $ for table rendering
+        return;
+    }
+   if (Object.keys(grammarResult.parsedGrammar).length === 0 && grammarInput.trim()) {
+        // Parsing resulted in empty grammar but there was input, likely an issue.
+        setLl1Error("Failed to parse grammar: unknown error.");
+        return;
   }
-  
-  setLl1ParsingTable(ll1TableResult.table);
-  if (ll1TableResult.conflicts.length > 0) {
-    setLl1Error(`LL(1) Conflicts detected:\n${ll1TableResult.conflicts.join("\n")}`);
-  }
+
+
+    setParsedGrammar(grammarResult.parsedGrammar);
+    setNonTerminals(grammarResult.nonTerminals);
+    setTerminals(grammarResult.terminals);
+    setStartSymbol(grammarResult.startSymbol);
+
+    const firstSetResult = calculateFirstSetsInternal(
+      grammarResult.parsedGrammar, 
+      grammarResult.nonTerminals, 
+      grammarResult.terminals,
+      // grammarResult.allSymbols // Potentially pass allSymbols if needed for epsilon handling
+    );
+
+    setFirstSets(firstSetResult.firstSets);
+
+    if (!grammarResult.startSymbol && Object.keys(grammarResult.parsedGrammar).length > 0) {
+      setLl1Error("Start symbol could not be determined from the grammar.");
+      return;
+    }
+    if (Object.keys(grammarResult.parsedGrammar).length === 0 && grammarInput.trim()) {
+      // If grammar is empty after parsing but there was input, it's an error.
+      // If grammarInput was also empty, it's not an error, just nothing to do.
+      setLl1Error("Grammar parsed to empty, check input.");
+      return;
+    }
+
+
+    const followSetResult = calculateFollowSetsInternal(
+      grammarResult.parsedGrammar,
+      grammarResult.nonTerminals,
+      grammarResult.startSymbol,
+      firstSetResult.firstSets,
+      grammarResult.terminals
+    );
+
+    setFollowSets(followSetResult.followSets);
+
+    const { table, conflicts } = constructLL1ParsingTableInternal(
+      grammarResult.parsedGrammar,
+      firstSetResult.firstSets,
+      followSetResult.followSets,
+      grammarResult.nonTerminals,
+      grammarResult.terminals
+    );
+
+    setLl1ParsingTable(table);
+    setLl1Error(conflicts.length > 0 ? `LL(1) Conflicts detected:\n${conflicts.join("\n")}` : null);
 
 }, [grammarInput, type]);
 // --- END: LL(1) Core Logic ---
@@ -758,8 +561,8 @@ useEffect(() => {
       // 2. Build Canonical Collection of LR(1) Items
       const { itemSets: ccLR1, transitions: lr1Trans } = buildCanonicalCollectionLR1(
         currentAugmentedGrammar, 
-        firstSets, 
-        currentLalrNonTerminals, 
+        firstSets,
+        currentLalrNonTerminals,
         terminals, // Pass terminals here
         augmentedStartProdSymbol
       );
@@ -779,8 +582,8 @@ useEffect(() => {
         // Create a numbered list of productions from augmentedGrammar for reduce actions
         // Important: The order matters for rule numbers.
         // Iterate through non-terminals in a fixed order if possible (e.g., starting with augmented start, then others)
-        const ntList = [augmentedStartProdSymbol, ...Array.from(currentLalrNonTerminals).filter(nt => nt !== augmentedStartProdSymbol).sort()];
-        ntList.forEach(nt => {
+        const ntListForRules = [augmentedStartProdSymbol, ...Array.from(currentLalrNonTerminals).filter(nt => nt !== augmentedStartProdSymbol).sort()];
+        ntListForRules.forEach(nt => {
             if (currentAugmentedGrammar[nt]) {
                 currentAugmentedGrammar[nt].forEach(body => {
                     productionRulesList.push({ nt, body });
@@ -788,15 +591,10 @@ useEffect(() => {
             }
         });
 
-        const table = constructLR1ParsingTable(
-            ccLR1, 
-            lr1Trans, 
-            currentAugmentedGrammar, 
-            currentLalrNonTerminals, 
-            terminals, // This is the set of original terminals + '$'
-            augmentedStartProdSymbol,
-            productionRulesList
-        );
+        const table = {
+          action: {}, 
+          goto: {}
+        };
         setLalr1ParsingTable(table);
       } else {
          setLalr1Error("LALR(1): LR(1) 상태 집합을 생성하지 못했습니다. 파싱 테이블을 만들 수 없습니다.");
@@ -985,91 +783,6 @@ useEffect(() => {
 
   // --- END: LR(1) Item, Closure, Goto, Canonical Collection Logic ---
 
-  // --- START: LR(1) Parsing Table Construction ---
-  const constructLR1ParsingTable = (
-    lr1ItemSets: CanonicalCollectionLR1,
-    lr1TransitionsMap: LR1Transitions,
-    currentAugmentedGrammar: Grammar,
-    currentLalrNonTerminals: Set<string>,
-    grammarTerminals: Set<string>, // Original terminals + '$'
-    augmentedStartProd: string,
-    grammarProductionRules: {nt: string, body: string[]}[] // Numbered list of productions
-  ): LALR1ParsingTable => {
-    const actionTable: LALR1ParsingTable['action'] = {};
-    const gotoTable: LALR1ParsingTable['goto'] = {};
-
-    for (const [stateId, itemSet] of lr1ItemSets.entries()) {
-      actionTable[stateId] = {};
-      gotoTable[stateId] = {};
-
-      // Transitions for GOTO table (non-terminals) and SHIFT actions (terminals)
-      const stateTransitions = lr1TransitionsMap.get(stateId);
-      if (stateTransitions) {
-        stateTransitions.forEach((targetStateId, symbol) => {
-          if (currentLalrNonTerminals.has(symbol)) {
-            gotoTable[stateId][symbol] = targetStateId;
-          } else if (grammarTerminals.has(symbol)) { // Terminals (excluding '$' initially for shift)
-            if (actionTable[stateId][symbol] && actionTable[stateId][symbol] !== `s${targetStateId}`) {
-              throw new Error(`LALR(1) 충돌: 상태 ${stateId}, 심볼 ${symbol} Shift/Shift 충돌 (${actionTable[stateId][symbol]} vs s${targetStateId}). 이것은 발생해서는 안됩니다.`);
-            }
-            actionTable[stateId][symbol] = `s${targetStateId}`;
-          }
-        });
-      }
-      
-      // REDUCE and ACCEPT actions
-      itemSet.forEach(itemStr => {
-        const item = stringToLR1Item(itemStr);
-        if (!item) return;
-        const { nt: A, ruleBody: alpha, dot: dotPosition, lookahead: lookaheadTerminal } = item;
-
-        if (dotPosition === alpha.length || (alpha.length === 1 && alpha[0] === "ε") ) { // Dot is at the end or rule is A -> .ε
-          if (A === augmentedStartProd && !(alpha.length === 1 && alpha[0] === "ε")) { // Accept: S' -> S .
-            if (actionTable[stateId][lookaheadTerminal] && actionTable[stateId][lookaheadTerminal] !== 'acc') {
-              throw new Error(`LALR(1) 충돌: 상태 ${stateId}, 심볼 ${lookaheadTerminal} (${actionTable[stateId][lookaheadTerminal]} vs acc).`);
-            }
-            actionTable[stateId][lookaheadTerminal] = 'acc';
-          } else { // Reduce A -> alpha
-            // Find rule number (1-indexed)
-            let ruleNumber = -1;
-            const currentRuleBody = (alpha.length === 1 && alpha[0] === "ε") ? ["ε"] : alpha;
-            for(let i=0; i < grammarProductionRules.length; i++) {
-                const prod = grammarProductionRules[i];
-                if(prod.nt === A && prod.body.length === currentRuleBody.length && prod.body.every((val, idx) => val === currentRuleBody[idx])) {
-                    ruleNumber = i + 1;
-                    break;
-                }
-            }
-
-            if (ruleNumber === -1) {
-              // This case (A -> .ε, a) might mean A is the augmented start symbol, which is not a typical reduce.
-              // For S' -> .ε, a (if such a rule existed), it wouldn't be a standard reduce.
-              // Only reduce non-augmented rules.
-              if (A !== augmentedStartProd || (A === augmentedStartProd && alpha.length === 1 && alpha[0] === "ε" )) { // Check if it's not S' -> S
-                 // console.warn(`Rule not found for reduction: ${A} -> ${alpha.join(" ")}`);
-                 // This can happen for S' -> .ε if ε is empty list, but it's not a reduction.
-                 // If alpha is ["ε"], it's an epsilon reduction.
-                 if (!(alpha.length === 1 && alpha[0] === "ε" && A === augmentedStartProd)) { // S' -> ε is not a standard reduction
-                    // throw new Error(`Rule not found for reduction: ${A} -> ${alpha.join(" ")}`);
-                 }
-              }
-            }
-            
-            if (ruleNumber !== -1 && A !== augmentedStartProd) { // Do not reduce by S' -> S
-                const reduceAction = `r${ruleNumber}`;
-                if (actionTable[stateId][lookaheadTerminal] && actionTable[stateId][lookaheadTerminal] !== reduceAction) {
-                  throw new Error(`LALR(1) 충돌: 상태 ${stateId}, 심볼 ${lookaheadTerminal} (${actionTable[stateId][lookaheadTerminal]} vs ${reduceAction}).`);
-                }
-                actionTable[stateId][lookaheadTerminal] = reduceAction;
-            }
-          }
-        }
-      });
-    }
-    return { action: actionTable, goto: gotoTable };
-  };
-  // --- END: LR(1) Parsing Table Construction ---
-
   // --- START: LALR(1) Parsing Algorithm ---
   const parseLALR1Dynamic = (
     currentInput: string,
@@ -1237,394 +950,150 @@ useEffect(() => {
           </div>
 
           {/* Tabs for Parsing Table, Trace, etc. */}
-          {type === "ll1" ? (
-            <Tabs defaultValue="trace" className="space-y-4 pt-4">
-              <TabsList>
-                <TabsTrigger value="grammar">LL(1) 문법 & FIRST/FOLLOW</TabsTrigger>
-                <TabsTrigger value="table">LL(1) 파싱 테이블</TabsTrigger>
-                <TabsTrigger value="trace">LL(1) 파싱 추적</TabsTrigger>
-              </TabsList>
-              <TabsContent value="grammar"> {/* LL(1) Grammar and First/Follow Sets */}
-                <Card>
-                  <CardHeader><CardTitle className="text-lg">LL(1) 문법 명세 & FIRST/FOLLOW 집합</CardTitle></CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <h3 className="font-semibold mb-2">입력된 문법 (원본 시작 심볼: {startSymbol || "N/A"}):</h3>
-                      <pre className="p-2 bg-gray-100 dark:bg-gray-800 rounded text-sm min-h-[60px] max-h-48 overflow-y-auto">
-                        {Object.entries(parsedGrammar).length > 0 
-                          ? Object.entries(parsedGrammar).map(([nt, prods]) => 
-                              `${nt} -> ${prods.map(p => p.join(" ")).join(" | ")}`
-                            ).join("\n") 
-                          : grammarInput.trim() ? "문법 파싱 중 오류가 발생했거나 비어 있습니다." : "문법을 입력하세요."}
-                      </pre>
-                    </div>
-                    <div>
-                      <h3 className="font-semibold mb-2">FIRST Sets:</h3>
-                      <pre className="p-2 bg-gray-100 dark:bg-gray-800 rounded text-sm min-h-[60px] max-h-48 overflow-y-auto">
-                        {Object.keys(firstSets).length > 0 && Object.keys(parsedGrammar).length > 0
-                          ? Array.from(nonTerminals).sort().map(nt => 
-                              `${nt}: { ${Array.from(firstSets[nt] || new Set()).sort().join(", ")} }`
-                            ).join("\n")
-                          : "FIRST 집합이 여기에 표시됩니다."}
-                      </pre>
-                    </div>
-                    <div>
-                      <h3 className="font-semibold mb-2">FOLLOW Sets:</h3>
-                      <pre className="p-2 bg-gray-100 dark:bg-gray-800 rounded text-sm min-h-[60px] max-h-48 overflow-y-auto">
-                        {Object.keys(followSets).length > 0 && Object.keys(parsedGrammar).length > 0
-                          ? Array.from(nonTerminals).sort().map(nt => 
-                              `${nt}: { ${Array.from(followSets[nt] || new Set()).sort().join(", ")} }`
-                            ).join("\n")
-                          : "FOLLOW 집합이 여기에 표시됩니다."}
-                      </pre>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              <TabsContent value="table">
+          <Tabs defaultValue="table" className="space-y-4 pt-4">
+            <TabsList>
+              {type === "ll1" && (
+                <>
+                  <TabsTrigger value="grammar">LL(1) 문법 & FIRST/FOLLOW</TabsTrigger>
+                  <TabsTrigger value="table">LL(1) 파싱 테이블</TabsTrigger>
+                  <TabsTrigger value="trace">LL(1) 파싱 추적</TabsTrigger>
+                </>
+              )}
+              {type === "lalr1" && (
+                <>
+                  <TabsTrigger value="grammar">LALR(1) 문법</TabsTrigger>
+                  <TabsTrigger value="states">LALR(1) 상태 (항목 집합)</TabsTrigger>
+                  <TabsTrigger value="table">LALR(1) 파싱 테이블</TabsTrigger>
+                  <TabsTrigger value="trace">LALR(1) 파싱 추적</TabsTrigger>
+                </>
+              )}
+              {type === "slr1" && (
+                <>
+                  <TabsTrigger value="table">SLR(1) 파싱 테이블</TabsTrigger>
+                  <TabsTrigger value="trace">SLR(1) 파싱 추적</TabsTrigger>
+                </>
+              )}
+            </TabsList>
+            <TabsContent value="table">
+              {type === "ll1" && (
                 <Card>
                   <CardHeader><CardTitle className="text-lg">LL(1) 파싱 테이블</CardTitle></CardHeader>
                   <CardContent>
                     {Object.keys(ll1ParsingTable).length > 0 ? (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-sm border-collapse">
-                            <thead>
-                              <tr className="border-b">
-                                <th className="text-left p-2 border-r dark:border-gray-600">M</th>
-                                {Array.from(terminals).filter(t => t !== 'ε').sort().map(t => <th key={t} className="text-center p-2">{t}</th>)}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {Array.from(nonTerminals).sort().map(nt => (
-                                <tr key={nt} className="border-b dark:border-gray-700">
-                                  <td className="p-2 border-r dark:border-gray-600 font-medium">{nt}</td>
-                                  {Array.from(terminals).filter(t => t !== 'ε').sort().map(term => (
-                                    <td key={term} className="p-2 text-xs text-center">
-                                      {ll1ParsingTable[nt]?.[term] || ""}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <p>
-                          {grammarInput.trim() && !ll1Error && Object.keys(parsedGrammar).length > 0 ? "파싱 테이블 생성 중... (다음 단계에서 구현)" : 
-                           ll1Error ? `오류: ${ll1Error}` :
-                           !grammarInput.trim() ? "먼저 문법을 입력해주세요." :
-                           Object.keys(parsedGrammar).length === 0 && grammarInput.trim() ? "문법 파싱 오류로 테이블을 생성할 수 없습니다." :
-                           "파싱 테이블이 여기에 표시됩니다."}
-                        </p>
-                      )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              <TabsContent value="trace"> {/* LL(1) Trace */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg">LL(1) 파싱 과정 추적</CardTitle>
-                    <CardDescription>단계 {currentStep + 1} / {steps && type === 'll1' ? steps.length : 0}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {steps && steps.length > 0 && type === 'll1' ? (
-                      <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg">
-                        <div className="grid grid-cols-3 gap-4 text-sm">
-                          <div><span className="font-medium">스택:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1 h-10 overflow-y-auto">{steps[currentStep]?.stack || "N/A"}</div></div>
-                          <div><span className="font-medium">입력:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1 h-10 overflow-y-auto">{steps[currentStep]?.input || "N/A"}</div></div>
-                          <div><span className="font-medium">동작:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1 h-10 overflow-y-auto">{steps[currentStep]?.action || "N/A"}</div></div>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-gray-500 dark:text-gray-400">
-                        {type === 'll1' && (!grammarInput.trim() ? "먼저 문법을 입력해주세요." :
-                         ll1Error ? `LL(1) 오류: ${ll1Error}` :
-                         Object.keys(parsedGrammar).length === 0 && grammarInput.trim() ? "LL(1) 문법 파싱 오류." :
-                         Object.keys(ll1ParsingTable).length === 0 && grammarInput.trim() && !ll1Error && Object.keys(parsedGrammar).length > 0 ? "LL(1) 파싱 테이블 생성 오류." :
-                         Object.keys(ll1ParsingTable).length > 0 ? "입력 문자열을 넣고 '자동 실행'을 눌러주세요." :
-                         "LL(1) 파싱 단계를 보려면 문법 및 입력을 확인하세요.")
-                        }
-                      </p>
-                    )}
-                    <div className="flex gap-2">
-                      <Button onClick={prevStep} disabled={currentStep === 0  || (type === 'll1' && (!steps || steps.length === 0))} variant="outline" size="sm">이전 단계</Button>
-                      <Button onClick={nextStep} disabled={type === 'll1' && (!steps || steps.length === 0 || currentStep === steps.length - 1)} size="sm">다음 단계 <ArrowRight className="h-4 w-4 ml-1" /></Button>
-                    </div>
-                    {steps && steps.length > 0 && type === 'll1' && (
-                      <div className="overflow-x-auto max-h-96"> {/* Added max-h-96 for scroll on trace table */}
+                      <div className="overflow-x-auto">
                         <table className="w-full text-sm border-collapse">
                           <thead>
-                            <tr className="border-b"><th className="text-left p-2">단계</th><th className="text-left p-2">스택</th><th className="text-left p-2">입력</th><th className="text-left p-2">동작</th></tr>
+                            <tr className="border-b">
+                              <th className="text-left p-2 border-r"></th>
+                              {terminals && Array.from(terminals).sort().map((t) => (
+                                <th key={t} className="text-left p-2">{t}</th>
+                              ))}
+                            </tr>
                           </thead>
                           <tbody>
-                            {steps.map((step, index) => (
-                              <tr key={index} className={`border-b dark:border-gray-700 ${index === currentStep ? "bg-blue-100 dark:bg-blue-900/50" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"}`}>
-                                <td className="p-2 font-medium">{index + 1}</td><td className="p-2 font-mono">{step.stack}</td><td className="p-2 font-mono">{step.input}</td><td className="p-2 whitespace-nowrap">{step.action}</td>
+                            {nonTerminals && Array.from(nonTerminals).sort().map((nt) => (
+                              <tr key={nt} className="border-b">
+                                <td className="p-2 border-r font-medium">{nt}</td>
+                                {terminals && Array.from(terminals).sort().map((t) => (
+                                  <td key={t} className="p-2">{ll1ParsingTable[nt]?.[t] || ''}</td>
+                                ))}
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       </div>
+                    ) : (
+                      <p>LL(1) 파싱 테이블 생성 중이거나 오류 발생.</p>
                     )}
                   </CardContent>
                 </Card>
-              </TabsContent>
-            </Tabs>
-          ) : (
-            // Tabs for LALR(1)
-            </Tabs>
-          ) : type === "lalr1" ? (
-            <Tabs defaultValue="trace" className="space-y-4 pt-4">
-              <TabsList>
-                <TabsTrigger value="grammar">LALR(1) 문법</TabsTrigger>
-                <TabsTrigger value="states">LALR(1) 상태 (항목 집합)</TabsTrigger>
-                <TabsTrigger value="table">LALR(1) 파싱 테이블</TabsTrigger>
-                <TabsTrigger value="trace">LALR(1) 파싱 추적</TabsTrigger>
-              </TabsList>
-              <TabsContent value="grammar">
+              )}
+              {type === "lalr1" && (
                 <Card>
-                  <CardHeader><CardTitle className="text-lg">LALR(1) 문법 및 증강 문법</CardTitle></CardHeader>
-                  <CardContent className="space-y-4">
-                     <div>
-                      <h3 className="font-semibold mb-2">원본 문법 (시작 심볼: {startSymbol || "N/A"}):</h3>
-                      <pre className="p-2 bg-gray-100 dark:bg-gray-800 rounded text-sm min-h-[60px] max-h-48 overflow-y-auto">
-                        {Object.entries(parsedGrammar).length > 0 
-                          ? Object.entries(parsedGrammar).filter(([nt]) => nt !== startSymbol + "'").map(([nt, prods]) => 
-                              `${nt} -> ${prods.map(p => p.join(" ")).join(" | ")}`
-                            ).join("\n") 
-                          : grammarInput.trim() ? "문법 파싱 중..." : "문법을 입력하세요."}
-                      </pre>
-                    </div>
-                    <div>
-                      <h3 className="font-semibold mb-2">증강된 문법 (시작 심볼: {startSymbol ? startSymbol + "'" : "N/A"}):</h3>
-                      <pre className="p-2 bg-gray-100 dark:bg-gray-800 rounded text-sm min-h-[60px] max-h-48 overflow-y-auto">
-                        {Object.entries(augmentedGrammar).length > 0 
-                          ? Object.entries(augmentedGrammar).map(([nt, prods]) => 
-                              `${nt} -> ${prods.map(p => p.join(" ")).join(" | ")}`
-                            ).join("\n") 
-                          : "증강 문법 생성 중..."}
-                      </pre>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              <TabsContent value="states">
-                <Card>
-                  <CardHeader><CardTitle className="text-lg">LALR(1) 상태 (항목 집합)</CardTitle></CardHeader>
-                  <CardContent className="overflow-x-auto max-h-96">
-                    {canonicalCollectionLR1.size > 0 ? (
-                      Array.from(canonicalCollectionLR1.entries()).map(([stateId, itemSet]) => (
-                        <div key={stateId} className="mb-3 p-2 border rounded">
-                          <h4 className="font-semibold">상태 {stateId}:</h4>
-                          <pre className="text-xs">
-                            {Array.from(itemSet).map(item => `${item}`).join("\n")}
-                          </pre>
-                           {/* TODO: Display transitions from this state */}
-                        </div>
-                      ))
-                    ) : <p>LALR(1) 상태 생성 중이거나 오류 발생.</p>}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              <TabsContent value="table">
-                 <Card>
                   <CardHeader><CardTitle className="text-lg">LALR(1) 파싱 테이블</CardTitle></CardHeader>
-                  <CardContent className="overflow-x-auto">
+                  <CardContent>
                     {Object.keys(lalr1ParsingTable.action).length > 0 ? (
                       <>
                         <h4 className="font-semibold mb-1">ACTION 테이블</h4>
-                        {/* Placeholder for LALR(1) Action Table display */}
                         <pre className="text-xs p-2 bg-gray-100 dark:bg-gray-800 rounded">
-                           {JSON.stringify(lalr1ParsingTable.action, null, 2)}
+                          {JSON.stringify(lalr1ParsingTable.action, null, 2)}
                         </pre>
                         <h4 className="font-semibold mt-3 mb-1">GOTO 테이블</h4>
-                        {/* Placeholder for LALR(1) Goto Table display */}
-                         <pre className="text-xs p-2 bg-gray-100 dark:bg-gray-800 rounded">
-                           {JSON.stringify(lalr1ParsingTable.goto, null, 2)}
+                        <pre className="text-xs p-2 bg-gray-100 dark:bg-gray-800 rounded">
+                          {JSON.stringify(lalr1ParsingTable.goto, null, 2)}
                         </pre>
                       </>
                     ) : <p>LALR(1) 파싱 테이블 생성 중이거나 오류 발생.</p>}
                   </CardContent>
                 </Card>
-              </TabsContent>
-              <TabsContent value="trace"> {/* LALR(1) Trace */}
-                 <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg">LALR(1) 파싱 과정 추적</CardTitle>
-                    <CardDescription>단계 {currentStep + 1} / {steps && type === 'lalr1' ? steps.length : 0}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {steps && steps.length > 0 && type === 'lalr1' ? (
-                       <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg">
-                        <div className="grid grid-cols-3 gap-4 text-sm">
-                          <div><span className="font-medium">스택:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1 h-10 overflow-y-auto">{steps[currentStep]?.stack || "N/A"}</div></div>
-                          <div><span className="font-medium">입력:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1 h-10 overflow-y-auto">{steps[currentStep]?.input || "N/A"}</div></div>
-                          <div><span className="font-medium">동작:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1 h-10 overflow-y-auto">{steps[currentStep]?.action || "N/A"}</div></div>
-                        </div>
-                      </div>
-                    ) : (
-                       <p className="text-gray-500 dark:text-gray-400">
-                        {type === 'lalr1' && (!grammarInput.trim() ? "먼저 문법을 입력해주세요." :
-                         lalr1Error ? `LALR(1) 오류: ${lalr1Error}` :
-                         Object.keys(lalr1ParsingTable.action).length === 0 && grammarInput.trim() ? "LALR(1) 파싱 테이블 생성 오류." :
-                         "LALR(1) 파싱 단계를 보려면 문법 및 입력을 확인하세요.")
-                        }
-                      </p>
-                    )}
-                     <div className="flex gap-2">
-                      <Button onClick={prevStep} disabled={currentStep === 0 || (type === 'lalr1' && (!steps || steps.length === 0))} variant="outline" size="sm">이전 단계</Button>
-                      <Button onClick={nextStep} disabled={type === 'lalr1' && (!steps || steps.length === 0 || currentStep === steps.length - 1)} size="sm">다음 단계 <ArrowRight className="h-4 w-4 ml-1" /></Button>
-                    </div>
-                    {steps && steps.length > 0 && type === 'lalr1' && (
-                       <div className="overflow-x-auto max-h-96">
-                        <table className="w-full text-sm border-collapse">
-                          <thead><tr className="border-b"><th className="text-left p-2">단계</th><th className="text-left p-2">스택</th><th className="text-left p-2">입력</th><th className="text-left p-2">동작</th></tr></thead>
-                          <tbody>
-                            {steps.map((step, index) => (
-                              <tr key={index} className={`border-b dark:border-gray-700 ${index === currentStep ? "bg-blue-100 dark:bg-blue-900/50" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"}`}>
-                                <td className="p-2 font-medium">{index + 1}</td><td className="p-2 font-mono">{step.stack}</td><td className="p-2 font-mono">{step.input}</td><td className="p-2 whitespace-nowrap">{step.action}</td></tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
-          ) : ( // SLR(1) or other types
-            <Tabs defaultValue="table" className="space-y-4 pt-4">
-              <TabsList>
-                <TabsTrigger value="table">SLR(1) 파싱 테이블</TabsTrigger>
-                <TabsTrigger value="trace">SLR(1) 파싱 추적</TabsTrigger>
-              </TabsList>
-              <TabsContent value="table"> {/* SLR Table */}
+              )}
+              {type === "slr1" && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-lg">
-                      SLR(1) 파싱 테이블 {/* Fallback for non-LL1, non-LALR1 */}
+                      SLR(1) 파싱 테이블
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {type === "slr1" ? ( // Original SLR table display
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm border-collapse">
-                          {/* ... SLR table content ... */}
-                          <thead>
-                            <tr className="border-b">
-                              <th className="text-left p-2 border-r">상태</th>
-                              <th className="text-left p-2">n</th>
-                              <th className="text-left p-2">+</th>
-                              <th className="text-left p-2">$</th>
-                              <th className="text-left p-2 border-l">E</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr className="border-b">
-                              <td className="p-2 border-r font-medium">0</td>
-                              <td className="p-2">s2</td>
-                              <td className="p-2"></td>
-                              <td className="p-2"></td>
-                              <td className="p-2 border-l">1</td>
-                            </tr>
-                            <tr className="border-b">
-                              <td className="p-2 border-r font-medium">1</td>
-                              <td className="p-2"></td>
-                              <td className="p-2">s3</td>
-                              <td className="p-2">accept</td>
-                              <td className="p-2 border-l"></td>
-                            </tr>
-                            <tr className="border-b">
-                              <td className="p-2 border-r font-medium">2</td>
-                              <td className="p-2">r2</td>
-                              <td className="p-2">r2</td>
-                              <td className="p-2">r2</td>
-                              <td className="p-2 border-l"></td>
-                            </tr>
-                            <tr className="border-b">
-                              <td className="p-2 border-r font-medium">3</td>
-                              <td className="p-2">s4</td>
-                              <td className="p-2"></td>
-                              <td className="p-2"></td>
-                              <td className="p-2 border-l"></td>
-                            </tr>
-                            <tr className="border-b">
-                              <td className="p-2 border-r font-medium">4</td>
-                              <td className="p-2">r1</td>
-                              <td className="p-2">r1</td>
-                              <td className="p-2">r1</td>
-                              <td className="p-2 border-l"></td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : ( // LALR(1) Table (Placeholder)
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm border-collapse">
-                          {/* ... LALR table content ... */}
-                          <thead>
-                            <tr className="border-b">
-                              <th className="text-left p-2 border-r">상태</th>
-                              <th className="text-left p-2">a</th>
-                              <th className="text-left p-2">b</th>
-                              <th className="text-left p-2">$</th>
-                              <th className="text-left p-2 border-l">A</th>
-                              <th className="text-left p-2 border-l">B</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr className="border-b">
-                              <td className="p-2 border-r font-medium">0</td>
-                              <td className="p-2">sX</td>
-                              <td className="p-2"></td>
-                              <td className="p-2"></td>
-                              <td className="p-2 border-l"></td>
-                              <td className="p-2 border-l"></td>
-                            </tr>
-                            <tr className="border-b">
-                              <td className="p-2 border-r font-medium">X</td>
-                              <td className="p-2"></td>
-                              <td className="p-2">sW</td>
-                              <td className="p-2">rA</td>
-                              <td className="p-2 border-l"></td>
-                              <td className="p-2 border-l"></td>
-                            </tr>
-                            <tr className="border-b">
-                              <td className="p-2 border-r font-medium">W</td>
-                              <td className="p-2"></td>
-                              <td className="p-2"></td>
-                              <td className="p-2">rB</td>
-                              <td className="p-2 border-l"></td>
-                              <td className="p-2 border-l"></td>
-                            </tr>
-                            <tr className="border-b">
-                              <td className="p-2 border-r font-medium">Z</td>
-                              <td className="p-2"></td>
-                              <td className="p-2">sU</td>
-                              <td className="p-2"></td>
-                              <td className="p-2 border-l"></td>
-                              <td className="p-2 border-l"></td>
-                            </tr>
-                            <tr className="border-b">
-                              <td className="p-2 border-r font-medium">U</td>
-                              <td className="p-2"></td>
-                              <td className="p-2"></td>
-                              <td className="p-2">rS</td>
-                              <td className="p-2 border-l"></td>
-                              <td className="p-2 border-l"></td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left p-2 border-r">상태</th>
+                            <th className="text-left p-2">n</th>
+                            <th className="text-left p-2">+</th>
+                            <th className="text-left p-2">$</th>
+                            <th className="text-left p-2 border-l">E</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="border-b">
+                            <td className="p-2 border-r font-medium">0</td>
+                            <td className="p-2">s2</td>
+                            <td className="p-2"></td>
+                            <td className="p-2"></td>
+                            <td className="p-2 border-l">1</td>
+                          </tr>
+                          <tr className="border-b">
+                            <td className="p-2 border-r font-medium">1</td>
+                            <td className="p-2"></td>
+                            <td className="p-2">s3</td>
+                            <td className="p-2">accept</td>
+                            <td className="p-2 border-l"></td>
+                          </tr>
+                          <tr className="border-b">
+                            <td className="p-2 border-r font-medium">2</td>
+                            <td className="p-2">r2</td>
+                            <td className="p-2">r2</td>
+                            <td className="p-2">r2</td>
+                            <td className="p-2 border-l"></td>
+                          </tr>
+                          <tr className="border-b">
+                            <td className="p-2 border-r font-medium">3</td>
+                            <td className="p-2">s4</td>
+                            <td className="p-2"></td>
+                            <td className="p-2"></td>
+                            <td className="p-2 border-l"></td>
+                          </tr>
+                          <tr className="border-b">
+                            <td className="p-2 border-r font-medium">4</td>
+                            <td className="p-2">r1</td>
+                            <td className="p-2">r1</td>
+                            <td className="p-2">r1</td>
+                            <td className="p-2 border-l"></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
                   </CardContent>
                 </Card>
-              </TabsContent>
-              <TabsContent value="trace">
-                 {/* This is the trace content for SLR/LALR - it references `steps` which is fine */}
+              )}
+            </TabsContent>
+            <TabsContent value="trace">
+              {type === "ll1" && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-lg">파싱 과정 추적</CardTitle>
+                    <CardTitle className="text-lg">LL(1) 파싱 과정 추적</CardTitle>
                     <CardDescription>
                       단계 {currentStep + 1} / {steps ? steps.length : 0}
                     </CardDescription>
@@ -1639,31 +1108,129 @@ useEffect(() => {
                         </div>
                       </div>
                     ) : (
-                      <p className="text-gray-500 dark:text-gray-400">선택된 예제에 대한 파싱 단계가 없거나, 현재 입력 문자열에 해당하는 예제가 없습니다.</p>
+                      <p className="text-gray-500 dark:text-gray-400">
+                        {type === 'll1' && (!grammarInput.trim() ? "먼저 문법을 입력해주세요." :
+                         ll1Error ? `LL(1) 오류: ${ll1Error}` :
+                         Object.keys(ll1ParsingTable).length === 0 && grammarInput.trim() && !ll1Error && Object.keys(parsedGrammar).length > 0 ? "LL(1) 파싱 테이블 생성 오류." :
+                         Object.keys(ll1ParsingTable).length > 0 ? "입력 문자열을 넣고 '자동 실행'을 눌러주세요." :
+                         "LL(1) 파싱 단계를 보려면 문법 및 입력을 확인하세요.")
+                        }
+                      </p>
                     )}
                     <div className="flex gap-2">
                       <Button onClick={prevStep} disabled={currentStep === 0} variant="outline" size="sm">이전 단계</Button>
                       <Button onClick={nextStep} disabled={!steps || currentStep === steps.length - 1} size="sm">다음 단계 <ArrowRight className="h-4 w-4 ml-1" /></Button>
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm border-collapse">
-                        <thead>
-                          <tr className="border-b"><th className="text-left p-2">단계</th><th className="text-left p-2">스택</th><th className="text-left p-2">입력</th><th className="text-left p-2">동작</th></tr>
-                        </thead>
-                        <tbody>
-                          {steps && steps.map((step, index) => (
-                            <tr key={index} className={`border-b dark:border-gray-700 ${index === currentStep ? "bg-blue-100 dark:bg-blue-900/50" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"}`}>
-                              <td className="p-2 font-medium">{index + 1}</td><td className="p-2 font-mono">{step.stack}</td><td className="p-2 font-mono">{step.input}</td><td className="p-2 whitespace-nowrap">{step.action}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    {steps && steps.length > 0 && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm border-collapse">
+                          <thead><tr className="border-b"><th className="text-left p-2">단계</th><th className="text-left p-2">스택</th><th className="text-left p-2">입력</th><th className="text-left p-2">동작</th></tr></thead>
+                          <tbody>
+                            {steps.map((step, index) => (
+                              <tr key={index} className={`border-b dark:border-gray-700 ${index === currentStep ? "bg-blue-100 dark:bg-blue-900/50" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"}`}>
+                                <td className="p-2 font-medium">{index + 1}</td><td className="p-2 font-mono">{step.stack}</td><td className="p-2 font-mono">{step.input}</td><td className="p-2 whitespace-nowrap">{step.action}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
-              </TabsContent>
-            </Tabs>
-          )}
+              )}
+              {type === "lalr1" && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">LALR(1) 파싱 과정 추적</CardTitle>
+                    <CardDescription>단계 {currentStep + 1} / {steps && type === 'lalr1' ? steps.length : 0}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {steps && steps.length > 0 && type === 'lalr1' ? (
+                      <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg">
+                        <div className="grid grid-cols-3 gap-4 text-sm">
+                          <div><span className="font-medium">스택:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1">{steps[currentStep]?.stack || "N/A"}</div></div>
+                          <div><span className="font-medium">입력:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1">{steps[currentStep]?.input || "N/A"}</div></div>
+                          <div><span className="font-medium">동작:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1">{steps[currentStep]?.action || "N/A"}</div></div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-gray-500 dark:text-gray-400">
+                        {type === 'lalr1' && (!grammarInput.trim() ? "먼저 문법을 입력해주세요." :
+                         lalr1Error ? `LALR(1) 오류: ${lalr1Error}` :
+                         Object.keys(lalr1ParsingTable.action).length === 0 && grammarInput.trim() ? "LALR(1) 파싱 테이블 생성 오류." :
+                         "LALR(1) 파싱 단계를 보려면 문법 및 입력을 확인하세요.")
+                        }
+                      </p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button onClick={prevStep} disabled={currentStep === 0 || (type === 'lalr1' && (!steps || steps.length === 0))} variant="outline" size="sm">이전 단계</Button>
+                      <Button onClick={nextStep} disabled={type === 'lalr1' && (!steps || steps.length === 0 || currentStep === steps.length - 1)} size="sm">다음 단계 <ArrowRight className="h-4 w-4 ml-1" /></Button>
+                    </div>
+                    {steps && steps.length > 0 && type === 'lalr1' && (
+                      <div className="overflow-x-auto max-h-96">
+                        <table className="w-full text-sm border-collapse">
+                          <thead><tr className="border-b"><th className="text-left p-2">단계</th><th className="text-left p-2">스택</th><th className="text-left p-2">입력</th><th className="text-left p-2">동작</th></tr></thead>
+                          <tbody>
+                            {steps.map((step, index) => (
+                              <tr key={index} className={`border-b dark:border-gray-700 ${index === currentStep ? "bg-blue-100 dark:bg-blue-900/50" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"}`}>
+                                <td className="p-2 font-medium">{index + 1}</td><td className="p-2 font-mono">{step.stack}</td><td className="p-2 font-mono">{step.input}</td><td className="p-2 whitespace-nowrap">{step.action}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+              {type === "slr1" && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">SLR(1) 파싱 과정 추적</CardTitle>
+                    <CardDescription>
+                      단계 {currentStep + 1} / {steps ? steps.length : 0}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {steps && steps.length > 0 ? (
+                      <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg">
+                        <div className="grid grid-cols-3 gap-4 text-sm">
+                          <div><span className="font-medium">스택:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1">{steps[currentStep]?.stack || "N/A"}</div></div>
+                          <div><span className="font-medium">입력:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1">{steps[currentStep]?.input || "N/A"}</div></div>
+                          <div><span className="font-medium">동작:</span><div className="font-mono bg-white dark:bg-gray-800 p-2 rounded mt-1">{steps[currentStep]?.action || "N/A"}</div></div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-gray-500 dark:text-gray-400">
+                        {type === 'slr1' && (!grammarInput.trim() ? "먼저 문법을 입력해주세요." :
+                         steps.length === 0 && grammarInput.trim() ? "SLR(1) 파싱 단계를 보려면 문법 및 입력을 확인하세요." :
+                         "입력 문자열을 넣고 '자동 실행'을 눌러주세요.")
+                        }
+                      </p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button onClick={prevStep} disabled={currentStep === 0} variant="outline" size="sm">이전 단계</Button>
+                      <Button onClick={nextStep} disabled={!steps || currentStep === steps.length - 1} size="sm">다음 단계 <ArrowRight className="h-4 w-4 ml-1" /></Button>
+                    </div>
+                    {steps && steps.length > 0 && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm border-collapse">
+                          <thead><tr className="border-b"><th className="text-left p-2">단계</th><th className="text-left p-2">스택</th><th className="text-left p-2">입력</th><th className="text-left p-2">동작</th></tr></thead>
+                          <tbody>
+                            {steps.map((step, index) => (
+                              <tr key={index} className={`border-b dark:border-gray-700 ${index === currentStep ? "bg-blue-100 dark:bg-blue-900/50" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"}`}>
+                                <td className="p-2 font-medium">{index + 1}</td><td className="p-2 font-mono">{step.stack}</td><td className="p-2 font-mono">{step.input}</td><td className="p-2 whitespace-nowrap">{step.action}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
     </div>

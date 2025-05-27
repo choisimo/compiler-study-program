@@ -122,13 +122,13 @@ export default function NfaToDfaVisualizer() {
     const stepMessages: string[] = [];
     const localStepBreakdown: NfaToDfaStepDetail[] = []; // Use specific type
 
-    stepMessages.push(`Processing DFA State: ${currentDfaStateToProcess.id} (NFA states: {${Array.from(currentDfaStateToProcess.nfaStateIds).sort().join(',')}})`);
+    stepMessages.push(`Processing DFA State: ${currentDfaStateToProcess.id} (NFA states: {${Array.from(currentDfaStateToProcess.nfaStateIds || new Set()).sort().join(',')}})`);
 
     dfa.alphabet.forEach(symbol => { // dfa.alphabet should be set from nfaInput.alphabet
       stepMessages.push(`  For symbol '${symbol}':`);
       // Use imported helpers, pass nfaInput
-      const moveResultNfaIds = calculateMove(currentDfaStateToProcess.nfaStateIds, symbol, nfaInput);
-      stepMessages.push(`    move({${Array.from(currentDfaStateToProcess.nfaStateIds).sort().join(',')}}, ${symbol}) = {${Array.from(moveResultNfaIds).sort().join(',')}}`);
+      const moveResultNfaIds = calculateMove(currentDfaStateToProcess.nfaStateIds || new Set(), symbol, nfaInput);
+      stepMessages.push(`    move({${Array.from(currentDfaStateToProcess.nfaStateIds || new Set()).sort().join(',')}}, ${symbol}) = {${Array.from(moveResultNfaIds).sort().join(',')}}`);
 
       const targetNfaStateIds = calculateEpsilonClosure(moveResultNfaIds, nfaInput);
       stepMessages.push(`    ε-closure({${Array.from(moveResultNfaIds).sort().join(',')}}) = {${Array.from(targetNfaStateIds).sort().join(',')}}`);
@@ -177,7 +177,7 @@ export default function NfaToDfaVisualizer() {
       localStepBreakdown.push({
         dfaStateBeingProcessedId: currentDfaStateToProcess.id,
         symbol: symbol,
-        nfaStatesForMove: currentDfaStateToProcess.nfaStateIds,
+        nfaStatesForMove: currentDfaStateToProcess.nfaStateIds || new Set(),
         moveOutputNfaStates: moveResultNfaIds,
         epsilonClosureInputNfaStates: moveResultNfaIds, // Input to epsilon closure is output of move
         epsilonClosureOutputNfaStates: targetNfaStateIds,
@@ -187,17 +187,15 @@ export default function NfaToDfaVisualizer() {
       });
     });
 
-    setDfa(prevDfa => ({
-      ...prevDfa,
+    setDfa(prevDfa => {
       // Filter out states that are already in dfa.states or dfaStatesToProcess (beyond the current one)
       const uniqueNewDfaStates = newDfaStatesCreatedThisStep.filter(newState => 
-        !dfa.states.find(s => s.id === newState.id) && 
+        !prevDfa.states.find(s => s.id === newState.id) && 
         !dfaStatesToProcess.slice(1).find(s => s.id === newState.id)
       );
-
       return {
         ...prevDfa,
-        states: [...prevDfa.states, ...uniqueNewDfaStates], // Add only truly new states to the main list
+        states: [...prevDfa.states, ...uniqueNewDfaStates],
         transitions: [...prevDfa.transitions, ...newDfaTransitionsCreatedThisStep],
         acceptStateIds: [
           ...prevDfa.acceptStateIds,
@@ -281,7 +279,7 @@ export default function NfaToDfaVisualizer() {
               <h4 className="font-semibold text-md mb-2">
                 Detailed Breakdown for Processing DFA State: <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">{currentStepBreakdown[0]?.dfaStateBeingProcessedId}</code>
               </h4>
-              {currentStepBreakdown.map((detail: StepDetail, index: number) => (
+              {currentStepBreakdown.map((detail: NfaToDfaStepDetail, index: number) => (
                 <Card key={index} className="p-3 bg-slate-50 dark:bg-slate-800/30">
                   <CardHeader className="p-0 pb-2">
                     <CardTitle className="text-sm">Processing Symbol: <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">{detail.symbol}</code></CardTitle>
@@ -385,13 +383,13 @@ export default function NfaToDfaVisualizer() {
             <CardTitle>NFA Definition</CardTitle>
           </CardHeader>
           <CardContent>
-            <p><strong>States:</strong> {nfa.states.map((s: NfaState) => s.id).join(', ')}</p>
-            <p><strong>Alphabet:</strong> {nfa.alphabet.join(', ')}</p>
-            <p><strong>Start State:</strong> {nfa.startStateId}</p>
-            <p><strong>Accept States:</strong> {nfa.acceptStateIds.join(', ')}</p>
+            <p><strong>States:</strong> {nfaInput.states.map((s: NfaState) => s.id).join(', ')}</p>
+            <p><strong>Alphabet:</strong> {nfaInput.alphabet.join(', ')}</p>
+            <p><strong>Start State:</strong> {nfaInput.startStateId}</p>
+            <p><strong>Accept States:</strong> {nfaInput.acceptStateIds.join(', ')}</p>
             <h4 className="font-semibold mt-2 mb-1">Transitions (ε for epsilon):</h4>
             <ul className="text-sm max-h-40 overflow-y-auto">
-              {nfa.transitions.map((t: NfaTransition, i: number) => (
+              {nfaInput.transitions.map((t: NfaTransition, i: number) => (
                 <li key={i}>{`δ(${t.from}, ${t.symbol === null ? 'ε' : `'${t.symbol}'`}) = {${t.to}}`}</li>
               ))}
             </ul>
