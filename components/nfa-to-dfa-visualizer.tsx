@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input"; 
-import { Label } from "@/components/ui/label";   
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowRight, Play, RotateCcw as ResetIcon, StepBack, StepForward } from 'lucide-react'; 
+import { ArrowRight, Play, RotateCcw as ResetIcon, StepBack, StepForward } from 'lucide-react';
+import { StateDiagram } from './StateDiagram';
 
 // Import types and helpers from the new lib file
-import { 
-  NfaState, 
-  NfaTransition, 
+import {
+  NfaState,
+  NfaTransition,
   NfaOutput as Nfa, // Use NfaOutput as the Nfa type for this component
-  DfaStateData, 
-  DfaTransitionData, 
-  Dfa, 
+  DfaStateData,
+  DfaTransitionData,
+  Dfa,
   DfaExecutionStep,
   calculateEpsilonClosure,
   calculateMove,
@@ -25,13 +26,13 @@ import {
 interface NfaToDfaStepDetail {
   dfaStateBeingProcessedId: string;
   symbol: string;
-  nfaStatesForMove: Set<string>; 
+  nfaStatesForMove: Set<string>;
   moveOutputNfaStates: Set<string>;
-  epsilonClosureInputNfaStates: Set<string>; 
-  epsilonClosureOutputNfaStates: Set<string>; 
-  targetDfaStateId: string; 
-  isNewDfaState: boolean; 
-  transitionCreated: boolean; 
+  epsilonClosureInputNfaStates: Set<string>;
+  epsilonClosureOutputNfaStates: Set<string>;
+  targetDfaStateId: string;
+  isNewDfaState: boolean;
+  transitionCreated: boolean;
 }
 
 
@@ -76,14 +77,15 @@ export default function NfaToDfaVisualizer() {
   const [currentDfaExecStepIdx, setCurrentDfaExecStepIdx] = useState<number>(0);
   const [dfaExecResult, setDfaExecResult] = useState<"Not Started" | "Running" | "Accepted" | "Rejected">("Not Started");
   const [isDfaAutoPlaying, setIsDfaAutoPlaying] = useState<boolean>(false);
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
 
   const resetDfaConstruction = useCallback(() => {
     const initialNfaStartStateSet = new Set([nfaInput.startStateId]);
     // Pass nfaInput to helpers, which expect NfaOutput type (compatible)
-    const initialDfaStartStateNfaIds = calculateEpsilonClosure(initialNfaStartStateSet, nfaInput); 
+    const initialDfaStartStateNfaIds = calculateEpsilonClosure(initialNfaStartStateSet, nfaInput);
     const initialDfaStartStateId = `{${Array.from(initialDfaStartStateNfaIds).sort().join(',')}}`;
-    
+
     const initialDfaStateData: DfaStateData = {
       id: initialDfaStartStateId,
       nfaStateIds: initialDfaStartStateNfaIds,
@@ -91,9 +93,9 @@ export default function NfaToDfaVisualizer() {
       isAcceptState: Array.from(initialDfaStartStateNfaIds).some(id => nfaInput.acceptStateIds.includes(id))
     };
 
-    setDfa({ 
+    setDfa({
       states: [initialDfaStateData],
-      alphabet: nfaInput.alphabet, 
+      alphabet: nfaInput.alphabet,
       transitions: [],
       startStateId: initialDfaStateData.id,
       acceptStateIds: initialDfaStateData.isAcceptState ? [initialDfaStateData.id] : []
@@ -103,7 +105,7 @@ export default function NfaToDfaVisualizer() {
     setCurrentStepBreakdown([]);
     setDfaStatesProcessed([]);
     handleDfaExecReset(); // Reset DFA execution as well
-  }, [nfaInput]); 
+  }, [nfaInput]);
 
   useEffect(() => {
     resetDfaConstruction();
@@ -141,8 +143,8 @@ export default function NfaToDfaVisualizer() {
       if (targetNfaStateIds.size > 0) {
         targetDfaStateId = `{${Array.from(targetNfaStateIds).sort().join(',')}}`;
         stepMessages.push(`    Resulting NFA state set for DFA: ${targetDfaStateId}`);
-        existingDfaState = dfa.states.find(s => s.id === targetDfaStateId) || 
-                           dfaStatesToProcess.slice(1).find(s => s.id === targetDfaStateId);
+        existingDfaState = dfa.states.find(s => s.id === targetDfaStateId) ||
+          dfaStatesToProcess.slice(1).find(s => s.id === targetDfaStateId);
         if (!existingDfaState) { // If DFA state doesn't exist yet
           // Check if it's already in the list of states created *this step* but not yet added to main dfa.states
           const alreadyQueuedThisStep = newDfaStatesCreatedThisStep.find(s => s.id === targetDfaStateId);
@@ -160,7 +162,7 @@ export default function NfaToDfaVisualizer() {
             isNewDfa = true;
           }
         } else {
-            isNewDfa = false; // It exists in dfa.states or previously in dfaStatesToProcess
+          isNewDfa = false; // It exists in dfa.states or previously in dfaStatesToProcess
         }
 
         newDfaTransitionsCreatedThisStep.push({
@@ -189,8 +191,8 @@ export default function NfaToDfaVisualizer() {
 
     setDfa(prevDfa => {
       // Filter out states that are already in dfa.states or dfaStatesToProcess (beyond the current one)
-      const uniqueNewDfaStates = newDfaStatesCreatedThisStep.filter(newState => 
-        !prevDfa.states.find(s => s.id === newState.id) && 
+      const uniqueNewDfaStates = newDfaStatesCreatedThisStep.filter(newState =>
+        !prevDfa.states.find(s => s.id === newState.id) &&
         !dfaStatesToProcess.slice(1).find(s => s.id === newState.id)
       );
       return {
@@ -200,16 +202,16 @@ export default function NfaToDfaVisualizer() {
         acceptStateIds: [
           ...prevDfa.acceptStateIds,
           ...uniqueNewDfaStates.filter(s => s.isAcceptState).map(s => s.id)
-        ].filter((value, index, self) => self.indexOf(value) === index) 
+        ].filter((value, index, self) => self.indexOf(value) === index)
       };
     });
-    
+
     setDfaStatesProcessed(prev => [...prev, currentDfaStateToProcess]);
     // Add only unique new states to the processing queue
-    const trulyNewToQueue = newDfaStatesCreatedThisStep.filter(newState => 
-        !dfa.states.find(s => s.id === newState.id) && // Not in current dfa.states
-        !dfaStatesToProcess.slice(1).find(s => s.id === newState.id) && // Not in rest of queue
-        !newDfaStatesCreatedThisStep.slice(0, newDfaStatesCreatedThisStep.findIndex(s => s.id === newState.id)).find(s => s.id === newState.id) // Not already added in this batch before this instance
+    const trulyNewToQueue = newDfaStatesCreatedThisStep.filter(newState =>
+      !dfa.states.find(s => s.id === newState.id) && // Not in current dfa.states
+      !dfaStatesToProcess.slice(1).find(s => s.id === newState.id) && // Not in rest of queue
+      !newDfaStatesCreatedThisStep.slice(0, newDfaStatesCreatedThisStep.findIndex(s => s.id === newState.id)).find(s => s.id === newState.id) // Not already added in this batch before this instance
     );
     setDfaStatesToProcess(prev => [...prev.slice(1), ...trulyNewToQueue]);
 
@@ -250,8 +252,81 @@ export default function NfaToDfaVisualizer() {
     return () => clearTimeout(timer);
   }, [isDfaAutoPlaying, currentDfaExecStepIdx, dfaExecSteps.length]);
 
+  // Get current NFA and DFA states for visualization
+  const currentNfaStates = nfaInput.states;
+  const currentDfaStates = dfa.states;
+
+  // Get current NFA transitions
+  const nfaTransitions = nfaInput.transitions.map(t => ({
+    from: t.from,
+    to: t.to,
+    symbol: t.symbol || 'ε'
+  }));
+
+  // Get current DFA transitions
+  const dfaTransitions = dfa.transitions.map(t => ({
+    from: t.fromDfaStateId,
+    to: t.toDfaStateId,
+    symbol: t.symbol
+  }));
+
+  // Get highlighted states for NFA (current processing state)
+  const highlightedNfaStates = currentStepBreakdown.length > 0
+    ? Array.from(currentStepBreakdown[0]?.nfaStatesForMove || [])
+    : [];
+
+  // Get highlighted states for DFA (current state being processed)
+  const highlightedDfaStates = dfaStatesToProcess.length > 0
+    ? [dfaStatesToProcess[0].id]
+    : [];
+
+  // Get highlighted transitions
+  const highlightedEdges = currentStepBreakdown.flatMap(step =>
+    step.transitionCreated ? [`${step.dfaStateBeingProcessedId}-${step.targetDfaStateId}-${step.symbol}`] : []
+  );
+
   return (
     <div className="space-y-6">
+      {/* State Diagrams */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>NFA State Diagram</CardTitle>
+          </CardHeader>
+          <CardContent className="h-96">
+            <StateDiagram
+              states={nfaInput.states.map(s => ({
+                id: s.id,
+                isStartState: s.id === nfaInput.startStateId,
+                isAcceptState: nfaInput.acceptStateIds.includes(s.id)
+              }))}
+              transitions={nfaTransitions}
+              highlightedStates={highlightedNfaStates}
+              title="NFA State Diagram"
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>DFA State Diagram</CardTitle>
+          </CardHeader>
+          <CardContent className="h-96">
+            <StateDiagram
+              states={dfa.states.map(s => ({
+                id: s.id,
+                isStartState: s.id === dfa.startStateId,
+                isAcceptState: dfa.acceptStateIds.includes(s.id)
+              }))}
+              transitions={dfaTransitions}
+              highlightedStates={highlightedDfaStates}
+              highlightedEdges={highlightedEdges}
+              title="DFA State Diagram"
+            />
+          </CardContent>
+        </Card>
+      </div>
+      {/* NFA to DFA Converter Card */}
       <Card>
         <CardHeader>
           <CardTitle>NFA to DFA Converter</CardTitle>
@@ -262,7 +337,7 @@ export default function NfaToDfaVisualizer() {
             <Button onClick={handleNextStep} disabled={dfaStatesToProcess.length === 0}>
               Next DFA Construction Step
             </Button>
-             <Button onClick={resetDfaConstruction} variant="outline">
+            <Button onClick={resetDfaConstruction} variant="outline">
               Reset Construction
             </Button>
           </div>
@@ -275,7 +350,7 @@ export default function NfaToDfaVisualizer() {
 
           {/* Detailed Step Breakdown Section for NFA to DFA */}
           {currentStepBreakdown.length > 0 && dfaStatesToProcess.length > 0 && (
-             <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-3">
               <h4 className="font-semibold text-md mb-2">
                 Detailed Breakdown for Processing DFA State: <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">{currentStepBreakdown[0]?.dfaStateBeingProcessedId}</code>
               </h4>
@@ -285,12 +360,12 @@ export default function NfaToDfaVisualizer() {
                     <CardTitle className="text-sm">Processing Symbol: <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">{detail.symbol}</code></CardTitle>
                   </CardHeader>
                   <CardContent className="p-0 text-xs space-y-1">
-                    <p><strong>1. Move Operation (on NFA states {`{${Array.from(detail.nfaStatesForMove).sort().join(',')}}`}):</strong><br/>
+                    <p><strong>1. Move Operation (on NFA states {`{${Array.from(detail.nfaStatesForMove).sort().join(',')}}`}):</strong><br />
                       <code className="block bg-white dark:bg-gray-900 p-1 rounded border dark:border-gray-700">
                         move({`{${Array.from(detail.nfaStatesForMove).sort().join(',')}}`}, '{detail.symbol}') = {`{${Array.from(detail.moveOutputNfaStates).sort().join(',')}}`}
                       </code>
                     </p>
-                    <p><strong>2. Epsilon Closure:</strong><br/>
+                    <p><strong>2. Epsilon Closure:</strong><br />
                       <code className="block bg-white dark:bg-gray-900 p-1 rounded border dark:border-gray-700">
                         ε-closure({`{${Array.from(detail.epsilonClosureInputNfaStates).sort().join(',')}}`}) = {`{${Array.from(detail.epsilonClosureOutputNfaStates).sort().join(',')}}`}
                       </code>
@@ -309,7 +384,7 @@ export default function NfaToDfaVisualizer() {
                       </p>
                     )}
                     {!detail.transitionCreated && detail.targetDfaStateId === "" && (
-                       <p className="text-orange-600 dark:text-orange-400">No transition created (empty resulting set).</p>
+                      <p className="text-orange-600 dark:text-orange-400">No transition created (empty resulting set).</p>
                     )}
                   </CardContent>
                 </Card>
@@ -318,6 +393,46 @@ export default function NfaToDfaVisualizer() {
           )}
         </CardContent>
       </Card>
+
+      {/* State Diagrams */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>NFA State Diagram</CardTitle>
+          </CardHeader>
+          <CardContent className="h-96">
+            <StateDiagram
+              states={nfaInput.states.map(s => ({
+                id: s.id,
+                isStartState: s.id === nfaInput.startStateId,
+                isAcceptState: nfaInput.acceptStateIds.includes(s.id)
+              }))}
+              transitions={nfaTransitions}
+              highlightedStates={highlightedNfaStates}
+              title="NFA State Diagram"
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>DFA State Diagram</CardTitle>
+          </CardHeader>
+          <CardContent className="h-96">
+            <StateDiagram
+              states={dfa.states.map(s => ({
+                id: s.id,
+                isStartState: s.id === dfa.startStateId,
+                isAcceptState: dfa.acceptStateIds.includes(s.id)
+              }))}
+              transitions={dfaTransitions}
+              highlightedStates={highlightedDfaStates}
+              highlightedEdges={highlightedEdges}
+              title="DFA State Diagram"
+            />
+          </CardContent>
+        </Card>
+      </div>
 
       {/* DFA Execution Section */}
       <Card>
@@ -329,26 +444,26 @@ export default function NfaToDfaVisualizer() {
           <div className="flex gap-2 items-end">
             <div className="flex-grow space-y-1">
               <Label htmlFor="dfa-exec-input">Input String</Label>
-              <Input 
-                id="dfa-exec-input" 
-                value={dfaInputForExec} 
+              <Input
+                id="dfa-exec-input"
+                value={dfaInputForExec}
                 onChange={(e) => setDfaInputForExec(e.target.value)}
                 placeholder="e.g., aab"
                 disabled={dfaStatesToProcess.length > 0} // Disable if DFA not fully constructed
               />
             </div>
             <Button onClick={() => handleRunDfaExecution(true)} disabled={dfaStatesToProcess.length > 0 || isDfaAutoPlaying}>Run All</Button>
-            <Button onClick={handleDfaAutoPlay} disabled={dfaStatesToProcess.length > 0 || isDfaAutoPlaying || dfaExecSteps.length > 0 && currentDfaExecStepIdx === dfaExecSteps.length -1 } variant="outline">
+            <Button onClick={handleDfaAutoPlay} disabled={dfaStatesToProcess.length > 0 || isDfaAutoPlaying || dfaExecSteps.length > 0 && currentDfaExecStepIdx === dfaExecSteps.length - 1} variant="outline">
               <Play className="h-4 w-4 mr-2" /> Auto Play
             </Button>
           </div>
-           <div className="flex gap-2 items-center">
-             <Button onClick={handleDfaExecPrev} disabled={currentDfaExecStepIdx === 0 || isDfaAutoPlaying || dfaExecSteps.length === 0} variant="outline" size="icon"><StepBack className="h-4 w-4"/></Button>
-            <Button onClick={handleDfaExecNext} disabled={currentDfaExecStepIdx >= dfaExecSteps.length - 1 || isDfaAutoPlaying || dfaExecSteps.length === 0} variant="outline" size="icon"><StepForward className="h-4 w-4"/></Button>
-            <Button onClick={handleDfaExecReset} disabled={isDfaAutoPlaying || dfaExecSteps.length === 0} variant="outline" size="icon"><ResetIcon className="h-4 w-4"/></Button>
-             <span className="text-sm text-gray-600 dark:text-gray-400">
-                Step: {dfaExecSteps.length > 0 ? currentDfaExecStepIdx + 1 : 0} / {dfaExecSteps.length}
-              </span>
+          <div className="flex gap-2 items-center">
+            <Button onClick={handleDfaExecPrev} disabled={currentDfaExecStepIdx === 0 || isDfaAutoPlaying || dfaExecSteps.length === 0} variant="outline" size="icon"><StepBack className="h-4 w-4" /></Button>
+            <Button onClick={handleDfaExecNext} disabled={currentDfaExecStepIdx >= dfaExecSteps.length - 1 || isDfaAutoPlaying || dfaExecSteps.length === 0} variant="outline" size="icon"><StepForward className="h-4 w-4" /></Button>
+            <Button onClick={handleDfaExecReset} disabled={isDfaAutoPlaying || dfaExecSteps.length === 0} variant="outline" size="icon"><ResetIcon className="h-4 w-4" /></Button>
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              Step: {dfaExecSteps.length > 0 ? currentDfaExecStepIdx + 1 : 0} / {dfaExecSteps.length}
+            </span>
           </div>
 
           {dfaExecSteps.length > 0 && (
@@ -358,9 +473,9 @@ export default function NfaToDfaVisualizer() {
                 {dfa.acceptStateIds.includes(dfaExecSteps[currentDfaExecStepIdx].currentStateId) && <span className="text-xs text-green-600 dark:text-green-400"> (Accept)</span>}
               </p>
               <p className="text-sm">
-                <strong>Input: </strong> 
+                <strong>Input: </strong>
                 <span className="font-mono">
-                  <span className="text-gray-400">{dfaInputForExec.substring(0, dfaInputForExec.length - dfaExecSteps[currentDfaExecStepIdx].remainingInput.length - (dfaExecSteps[currentDfaExecStepIdx].inputSymbol ? 1:0) )}</span>
+                  <span className="text-gray-400">{dfaInputForExec.substring(0, dfaInputForExec.length - dfaExecSteps[currentDfaExecStepIdx].remainingInput.length - (dfaExecSteps[currentDfaExecStepIdx].inputSymbol ? 1 : 0))}</span>
                   <span className="text-red-500 underline">{dfaExecSteps[currentDfaExecStepIdx].inputSymbol || ""}</span>
                   <span>{dfaExecSteps[currentDfaExecStepIdx].remainingInput}</span>
                 </span>
@@ -376,51 +491,30 @@ export default function NfaToDfaVisualizer() {
         </CardContent>
       </Card>
 
-
-      <div className="grid md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>NFA Definition</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p><strong>States:</strong> {nfaInput.states.map((s: NfaState) => s.id).join(', ')}</p>
-            <p><strong>Alphabet:</strong> {nfaInput.alphabet.join(', ')}</p>
-            <p><strong>Start State:</strong> {nfaInput.startStateId}</p>
-            <p><strong>Accept States:</strong> {nfaInput.acceptStateIds.join(', ')}</p>
-            <h4 className="font-semibold mt-2 mb-1">Transitions (ε for epsilon):</h4>
-            <ul className="text-sm max-h-40 overflow-y-auto">
-              {nfaInput.transitions.map((t: NfaTransition, i: number) => (
-                <li key={i}>{`δ(${t.from}, ${t.symbol === null ? 'ε' : `'${t.symbol}'`}) = {${t.to}}`}</li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Constructed DFA</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p><strong>States:</strong> {dfa.states.map((s: DfaStateData) => `${s.id}${s.isStartState ? " (Start)" : ""}${s.isAcceptState ? " (Accept)" : ""}`).join(', ')}</p>
-            <p><strong>Alphabet:</strong> {dfa.alphabet.join(', ')}</p>
-            <p><strong>Start State:</strong> {dfa.startStateId || "N/A"}</p>
-            <p><strong>Accept States:</strong> {dfa.acceptStateIds.join(', ') || "None"}</p>
-            <h4 className="font-semibold mt-2 mb-1">Transitions:</h4>
-            {dfa.transitions.length > 0 ? (
-              <div className="max-h-48 overflow-y-auto">
-                <Table>
-                  <TableHeader><TableRow><TableHead>From</TableHead><TableHead>Symbol</TableHead><TableHead>To</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {dfa.transitions.map((t: DfaTransitionData, i: number) => (
-                      <TableRow key={i}><TableCell>{t.fromDfaStateId}</TableCell><TableCell>{t.symbol}</TableCell><TableCell>{t.toDfaStateId}</TableCell></TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : <p>No transitions defined (DFA may not be fully constructed).</p>}
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Constructed DFA</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p><strong>States:</strong> {dfa.states.map((s: DfaStateData) => `${s.id}${s.isStartState ? " (Start)" : ""}${s.isAcceptState ? " (Accept)" : ""}`).join(', ')}</p>
+          <p><strong>Alphabet:</strong> {dfa.alphabet.join(', ')}</p>
+          <p><strong>Start State:</strong> {dfa.startStateId || "N/A"}</p>
+          <p><strong>Accept States:</strong> {dfa.acceptStateIds.join(', ') || "None"}</p>
+          <h4 className="font-semibold mt-2 mb-1">Transitions:</h4>
+          {dfa.transitions.length > 0 ? (
+            <div className="max-h-48 overflow-y-auto">
+              <Table>
+                <TableHeader><TableRow><TableHead>From</TableHead><TableHead>Symbol</TableHead><TableHead>To</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {dfa.transitions.map((t: DfaTransitionData, i: number) => (
+                    <TableRow key={i}><TableCell>{t.fromDfaStateId}</TableCell><TableCell>{t.symbol}</TableCell><TableCell>{t.toDfaStateId}</TableCell></TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : <p>No transitions defined (DFA may not be fully constructed).</p>}
+        </CardContent>
+      </Card>
     </div>
   );
 }
